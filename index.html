@@ -90,7 +90,8 @@
             Check: () => <i data-lucide="check" className="w-4 h-4"></i>,
             FilePlus: () => <i data-lucide="file-plus" className="w-4 h-4"></i>,
             Wallet: () => <i data-lucide="wallet" className="w-5 h-5"></i>,
-            Globe: () => <i data-lucide="globe" className="w-4 h-4"></i>
+            Globe: () => <i data-lucide="globe" className="w-4 h-4"></i>,
+            RefreshCw: () => <i data-lucide="refresh-cw" className="w-4 h-4"></i>
         };
 
         const CURRENCIES = ['TWD', 'USD', 'JPY', 'EUR', 'CNY', 'HKD'];
@@ -109,14 +110,14 @@
                 "應付帳款-Brian", "應付帳款-其他", "未實現-台股-評價"
             ],
             INCOME: [
-                "薪資", "利息收入", "股利收入", "獎金", "投資收益", "其他收入"
+                "薪資", "利息收入", "股利收入", "獎金", "投資收益", "其他收入", "匯兌損益"
             ],
             EXPENSES: [
                 "租金支出-房租管理費", "租金支出-水費", "租金支出-電費",
                 "伙食費", "保險費", "外在支出-彩妝保養", "外在支出-服裝飾品",
                 "交際費", "交通費", "電話費", "生活用品", "運動健康",
                 "旅遊-機加酒", "旅遊-伙食", "旅遊-交通", "旅遊-購物&其他",
-                "醫療費", "雜費"
+                "醫療費", "雜費", "匯兌損益"
             ]
         };
 
@@ -147,9 +148,7 @@
             const [activeTab, setActiveTab] = useState("journal"); 
             const [categories, setCategories] = useStickyState(DEFAULT_CATEGORIES, "my_app_categories_v2");
             const [entries, setEntries] = useStickyState([], "my_app_entries_v2");
-            // openingBalances 維持只存 TWD 金額，以保持運算兼容性
             const [openingBalances, setOpeningBalances] = useStickyState(DEFAULT_OPENING_BALANCES, "my_app_opening_balances_v2");
-            // 新增: 儲存期初餘額的詳細資訊 (幣別、原幣金額、匯率)
             const [openingBalanceMeta, setOpeningBalanceMeta] = useStickyState({}, "my_app_opening_meta_v1");
             
             const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
@@ -159,6 +158,11 @@
             const [description, setDescription] = useState("");
             const [currency, setCurrency] = useState("TWD"); 
             const [exchangeRate, setExchangeRate] = useState(1); 
+
+            // 評價工具 State
+            const [evalCurrency, setEvalCurrency] = useState("USD");
+            const [evalRate, setEvalRate] = useState("");
+            const [evalGainLossAccount, setEvalGainLossAccount] = useState("匯兌損益");
 
             const [isCsvUtf8, setIsCsvUtf8] = useState(true);
             
@@ -179,7 +183,7 @@
 
             useEffect(() => {
                 if (window.lucide) window.lucide.createIcons();
-            }, [activeTab, categories, entries, filterAccount, editingId, currency, editCurrency, openingBalanceMeta]);
+            }, [activeTab, categories, entries, filterAccount, editingId, currency, editCurrency, openingBalanceMeta, evalCurrency]);
 
             useEffect(() => {
                 if (currency === 'TWD') setExchangeRate(1);
@@ -215,9 +219,7 @@
                 }
             };
             
-            // 處理期初餘額變更
             const handleOpeningBalanceChange = (acc, field, val) => {
-                // 取得現有的 meta 或預設值
                 const currentMeta = openingBalanceMeta[acc] || { currency: 'TWD', amount: 0, rate: 1 };
                 
                 let newMeta = { ...currentMeta };
@@ -227,21 +229,18 @@
                     newMeta.currency = val;
                     if (val === 'TWD') {
                         newMeta.rate = 1;
-                        // 如果切回 TWD，將原本的 TWD 餘額視為原幣
                         newMeta.amount = newTwdBalance; 
                     }
-                } else if (field === 'amount') { // 原幣金額
+                } else if (field === 'amount') { 
                     newMeta.amount = parseFloat(val);
-                } else if (field === 'rate') { // 匯率
+                } else if (field === 'rate') { 
                     newMeta.rate = parseFloat(val);
-                } else if (field === 'twd_direct') { // 直接修改 TWD (當幣別是 TWD 時)
+                } else if (field === 'twd_direct') { 
                     newTwdBalance = parseFloat(val);
-                    newMeta.amount = newTwdBalance; // TWD 模式下，原幣=台幣
+                    newMeta.amount = newTwdBalance; 
                 }
 
-                // 計算台幣餘額 (如果不是直接修改 TWD)
                 if (field !== 'twd_direct' && newMeta.currency !== 'TWD') {
-                    // 四捨五入
                     newTwdBalance = Math.round((newMeta.amount || 0) * (newMeta.rate || 1));
                 }
 
@@ -493,12 +492,9 @@
                 return balances;
             }, [entries, openingBalances, allAccounts]);
 
-            // 計算資產負債表資料 (包含外幣餘額計算)
             const bsData = useMemo(() => {
-                // 1. 初始化外幣累積餘額 (從期初設定開始)
-                const foreignBalances = {}; // { "科目名": { "USD": 100, "JPY": 5000 } }
+                const foreignBalances = {}; 
 
-                // 載入期初外幣
                 Object.entries(openingBalanceMeta).forEach(([acc, meta]) => {
                     if (meta.currency && meta.currency !== 'TWD' && meta.amount) {
                          if (!foreignBalances[acc]) foreignBalances[acc] = {};
@@ -506,7 +502,6 @@
                     }
                 });
 
-                // 2. 加上交易變動
                 entries.forEach(e => {
                     if (e.currency && e.currency !== 'TWD') {
                         if (!foreignBalances[e.account]) foreignBalances[e.account] = {};
@@ -526,7 +521,7 @@
                         });
                         if (parts.length > 0) foreignStr = parts.join(", ");
                     }
-                    return { ...acc, foreignStr };
+                    return { ...acc, foreignStr, foreignRaw: foreign };
                 };
 
                 const assets = categories.ASSETS.map(acc => ({ name: acc, amount: currentBalances[acc] })).filter(i => i.amount !== 0).map(enrichAccount);
@@ -541,7 +536,8 @@
                     assets, totalAssets,
                     liabilities: liabilities.map(l => ({ ...l, amount: -l.amount })),
                     totalDisplayLiab: -totalLiabilities,
-                    equity: netIncome
+                    equity: netIncome,
+                    rawForeignBalances: foreignBalances // Export for revaluation tool
                 };
             }, [currentBalances, entries, categories, openingBalanceMeta]);
 
@@ -561,6 +557,105 @@
                 const totalExpense = expenseList.reduce((sum, i) => sum + i.amount, 0);
                 return { incomeList, expenseList, totalIncome, totalExpense, netIncome: totalIncome - totalExpense };
             }, [entries, reportMonth, categories]);
+
+            // --- Revaluation Logic ---
+            const revaluationPreview = useMemo(() => {
+                if (!evalRate || !evalCurrency) return [];
+                const rate = parseFloat(evalRate);
+                if (isNaN(rate)) return [];
+
+                const preview = [];
+                // Check all assets and liabilities that have the selected currency
+                [...bsData.assets, ...bsData.liabilities.map(l => ({...l, amount: -l.amount}))].forEach(acc => {
+                     const foreignAmt = acc.foreignRaw?.[evalCurrency] || 0;
+                     // Only revalue if there is a significant foreign amount
+                     if (Math.abs(foreignAmt) > 0.1) {
+                         const currentTwdBook = acc.amount; // Current TWD Balance
+                         // For liabilities, amount is negative, foreignAmt is usually negative.
+                         // But we want to compare absolute value conceptually or handle signs carefully.
+                         // Asset: foreignAmt > 0, rate > 0 => Target > 0.
+                         // Liability: foreignAmt < 0, rate > 0 => Target < 0.
+                         
+                         // BUT WAIT: 'acc.amount' in this loop for assets is positive, for liabilities (from bsData mapping) it might be positive in display but negative in accounting.
+                         // Let's use currentBalances directly for accuracy.
+                         const actualTwdBalance = currentBalances[acc.name];
+                         const targetTwdBalance = Math.round(foreignAmt * rate);
+                         const diff = targetTwdBalance - actualTwdBalance;
+
+                         if (Math.abs(diff) > 0) {
+                             preview.push({
+                                 account: acc.name,
+                                 foreignAmt,
+                                 bookValue: actualTwdBalance,
+                                 targetValue: targetTwdBalance,
+                                 diff: diff // Positive means Asset Gain (or Liability Loss reduction - technically Liability becomes "more positive" which is less debt? No.)
+                                 // Asset: 100 USD. Book 3000. New 3200. Diff +200. Gain.
+                                 // Liability: -100 USD. Book -3000. New -3200. Diff -200. Loss.
+                             });
+                         }
+                     }
+                });
+                return preview;
+            }, [evalCurrency, evalRate, bsData, currentBalances]);
+
+            const executeRevaluation = () => {
+                if (revaluationPreview.length === 0) return;
+                if (!confirm(`將產生 ${revaluationPreview.length} 筆調整分錄，確定執行？`)) return;
+
+                const newEntries = [];
+                const now = Date.now();
+                const dateStr = new Date().toISOString().split('T')[0];
+
+                revaluationPreview.forEach((item, index) => {
+                    const isGain = item.diff > 0;
+                    const absDiff = Math.abs(item.diff);
+                    
+                    // Logic:
+                    // If Diff > 0 (Asset Value Up, or Liability Value Up/Less Negative):
+                    //   Asset: Dr Asset, Cr Gain
+                    //   Liability: Dr Liability (reduces debt), Cr Gain
+                    // If Diff < 0 (Asset Value Down, or Liability Value Down/More Negative):
+                    //   Asset: Dr Loss, Cr Asset
+                    //   Liability: Dr Loss, Cr Liability (increases debt)
+
+                    // Construct Entry
+                    // We simply adjust the account by 'diff'.
+                    // If diff is +200, we add 200 to the account.
+                    // If diff is -200, we add -200 to the account.
+                    
+                    // But we need a balanced entry.
+                    // If Account +200 (Dr), then Gain/Loss -200 (Cr). -> Gain
+                    // If Account -200 (Cr), then Gain/Loss +200 (Dr). -> Loss
+
+                    const adjEntry = {
+                        id: now + index * 2,
+                        date: dateStr,
+                        account: item.account,
+                        amount: item.diff, // Adjust TWD balance
+                        currencyAmount: 0, // CRITICAL: Do not change foreign quantity
+                        currency: evalCurrency, // Tag it so we know source
+                        exchangeRate: parseFloat(evalRate),
+                        description: `期末評價-${evalCurrency} @ ${evalRate}`
+                    };
+
+                    const contraEntry = {
+                        id: now + index * 2 + 1,
+                        date: dateStr,
+                        account: evalGainLossAccount, // "匯兌損益"
+                        amount: -item.diff, // Balancing entry
+                        currencyAmount: 0,
+                        currency: evalCurrency,
+                        exchangeRate: parseFloat(evalRate),
+                        description: `期末評價-${item.account}`
+                    };
+
+                    newEntries.push(adjEntry, contraEntry);
+                });
+
+                setEntries([...newEntries, ...entries]);
+                alert("評價完成！");
+                setEvalRate(""); // Reset
+            };
 
 
             // --- UI Renders ---
@@ -898,8 +993,7 @@
                 return (
                 <div className="space-y-6 pb-28">
                     <div className="bg-white p-5 rounded-2xl border border-slate-100 card-shadow">
-                        <h3 className="font-bold text-slate-700 mb-5 flex items-center gap-2"><Icons.Wallet /> 期初餘額設定 (2026/01/30)</h3>
-                        
+                        <h3 className="font-bold text-slate-700 mb-5 flex items-center gap-2"><Icons.Wallet /> 期初餘額設定</h3>
                         <div className="space-y-6">
                             <div>
                                 <h4 className="text-xs font-bold text-blue-700 bg-blue-50 p-2 rounded-lg mb-3 inline-block px-3">資產 (Assets)</h4>
@@ -907,7 +1001,6 @@
                                     {categories.ASSETS.map(acc => renderBalanceInput(acc, false))}
                                 </div>
                             </div>
-
                             <div>
                                 <h4 className="text-xs font-bold text-amber-700 bg-amber-50 p-2 rounded-lg mb-3 inline-block px-3">負債 (Liabilities)</h4>
                                 <p className="text-[10px] text-slate-400 mb-2 px-1">* 請輸入負數表示欠款</p>
@@ -915,6 +1008,67 @@
                                     {categories.LIABILITIES.map(acc => renderBalanceInput(acc, true))}
                                 </div>
                             </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white p-5 rounded-2xl border border-slate-100 card-shadow">
+                        <h3 className="font-bold text-slate-700 mb-5 flex items-center gap-2">
+                            <Icons.RefreshCw /> 外幣資產重估 (FX Revaluation)
+                        </h3>
+                        <div className="space-y-4">
+                            <div className="bg-slate-50 p-4 rounded-xl space-y-4">
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-400 block mb-1">幣別</label>
+                                        <select value={evalCurrency} onChange={e => setEvalCurrency(e.target.value)} className="w-full p-2 border rounded-lg text-sm bg-white">
+                                            {CURRENCIES.filter(c => c !== 'TWD').map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-400 block mb-1">當前匯率</label>
+                                        <input type="number" inputMode="decimal" value={evalRate} onChange={e => setEvalRate(e.target.value)} className="w-full p-2 border rounded-lg text-sm bg-white" placeholder="輸入匯率" />
+                                    </div>
+                                </div>
+                                <div>
+                                     <label className="text-xs font-bold text-slate-400 block mb-1">損益科目</label>
+                                     <select value={evalGainLossAccount} onChange={e => setEvalGainLossAccount(e.target.value)} className="w-full p-2 border rounded-lg text-sm bg-white">
+                                         {categories.INCOME.map(a => <option key={a} value={a}>{a}</option>)}
+                                         {categories.EXPENSES.map(a => <option key={a} value={a}>{a}</option>)}
+                                     </select>
+                                </div>
+                            </div>
+                            
+                            {revaluationPreview.length > 0 && (
+                                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                                    <div className="bg-slate-100 p-2 text-xs font-bold text-slate-600 grid grid-cols-4 gap-2 text-center">
+                                        <span className="text-left">科目</span>
+                                        <span>原幣</span>
+                                        <span>帳面(TWD)</span>
+                                        <span>損益預估</span>
+                                    </div>
+                                    {revaluationPreview.map((item, idx) => (
+                                        <div key={idx} className="p-2 text-xs grid grid-cols-4 gap-2 text-center border-t border-slate-100 items-center">
+                                            <span className="text-left font-medium truncate">{item.account}</span>
+                                            <span className="font-mono">{item.foreignAmt.toLocaleString()}</span>
+                                            <span className="font-mono text-slate-400">{item.bookValue.toLocaleString()}</span>
+                                            <span className={`font-mono font-bold ${item.diff >= 0 ? 'text-asset' : 'text-liab'}`}>
+                                                {item.diff > 0 ? '+' : ''}{item.diff.toLocaleString()}
+                                            </span>
+                                        </div>
+                                    ))}
+                                    <div className="p-3 bg-slate-50 border-t border-slate-200">
+                                        <button onClick={executeRevaluation} className="w-full bg-slate-700 text-white py-2 rounded-lg text-sm font-bold shadow-sm active:scale-95 transition-transform">
+                                            產生評價分錄
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {evalRate && revaluationPreview.length === 0 && (
+                                <div className="text-center text-xs text-slate-400 py-2">
+                                    查無 {evalCurrency} 相關資產
+                                </div>
+                            )}
                         </div>
                     </div>
 
