@@ -159,7 +159,6 @@
             const [currency, setCurrency] = useState("TWD"); 
             const [exchangeRate, setExchangeRate] = useState(1); 
 
-            // 評價工具 State
             const [evalCurrency, setEvalCurrency] = useState("USD");
             const [evalRate, setEvalRate] = useState("");
             const [evalGainLossAccount, setEvalGainLossAccount] = useState("匯兌損益");
@@ -394,9 +393,11 @@
             const exportToCSV = () => {
                 const bom = "\uFEFF";
                 const headers = "ID,日期,會計科目,台幣金額,原幣金額,幣別,匯率,摘要\n";
-                const rows = entries.map(e => 
-                    `${e.id},${e.date},${e.account},${e.amount},${e.currencyAmount || Math.abs(e.amount)},${e.currency || 'TWD'},${e.exchangeRate || 1},"${e.description || ''}"`
-                ).join("\n");
+                // 修正：當 currencyAmount 為 0 時（評價分錄），應該匯出 0 而不是 fallback 到 amount
+                const rows = entries.map(e => {
+                    const foreignAmt = e.currencyAmount !== undefined ? e.currencyAmount : Math.abs(e.amount);
+                    return `${e.id},${e.date},${e.account},${e.amount},${foreignAmt},${e.currency || 'TWD'},${e.exchangeRate || 1},"${e.description || ''}"`;
+                }).join("\n");
                 const blob = new Blob([bom + headers + rows], { type: 'text/csv;charset=utf-8;' });
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');
@@ -565,19 +566,9 @@
                 if (isNaN(rate)) return [];
 
                 const preview = [];
-                // Check all assets and liabilities that have the selected currency
                 [...bsData.assets, ...bsData.liabilities.map(l => ({...l, amount: -l.amount}))].forEach(acc => {
                      const foreignAmt = acc.foreignRaw?.[evalCurrency] || 0;
-                     // Only revalue if there is a significant foreign amount
                      if (Math.abs(foreignAmt) > 0.1) {
-                         const currentTwdBook = acc.amount; // Current TWD Balance
-                         // For liabilities, amount is negative, foreignAmt is usually negative.
-                         // But we want to compare absolute value conceptually or handle signs carefully.
-                         // Asset: foreignAmt > 0, rate > 0 => Target > 0.
-                         // Liability: foreignAmt < 0, rate > 0 => Target < 0.
-                         
-                         // BUT WAIT: 'acc.amount' in this loop for assets is positive, for liabilities (from bsData mapping) it might be positive in display but negative in accounting.
-                         // Let's use currentBalances directly for accuracy.
                          const actualTwdBalance = currentBalances[acc.name];
                          const targetTwdBalance = Math.round(foreignAmt * rate);
                          const diff = targetTwdBalance - actualTwdBalance;
@@ -588,9 +579,7 @@
                                  foreignAmt,
                                  bookValue: actualTwdBalance,
                                  targetValue: targetTwdBalance,
-                                 diff: diff // Positive means Asset Gain (or Liability Loss reduction - technically Liability becomes "more positive" which is less debt? No.)
-                                 // Asset: 100 USD. Book 3000. New 3200. Diff +200. Gain.
-                                 // Liability: -100 USD. Book -3000. New -3200. Diff -200. Loss.
+                                 diff: diff 
                              });
                          }
                      }
@@ -607,33 +596,13 @@
                 const dateStr = new Date().toISOString().split('T')[0];
 
                 revaluationPreview.forEach((item, index) => {
-                    const isGain = item.diff > 0;
-                    const absDiff = Math.abs(item.diff);
-                    
-                    // Logic:
-                    // If Diff > 0 (Asset Value Up, or Liability Value Up/Less Negative):
-                    //   Asset: Dr Asset, Cr Gain
-                    //   Liability: Dr Liability (reduces debt), Cr Gain
-                    // If Diff < 0 (Asset Value Down, or Liability Value Down/More Negative):
-                    //   Asset: Dr Loss, Cr Asset
-                    //   Liability: Dr Loss, Cr Liability (increases debt)
-
-                    // Construct Entry
-                    // We simply adjust the account by 'diff'.
-                    // If diff is +200, we add 200 to the account.
-                    // If diff is -200, we add -200 to the account.
-                    
-                    // But we need a balanced entry.
-                    // If Account +200 (Dr), then Gain/Loss -200 (Cr). -> Gain
-                    // If Account -200 (Cr), then Gain/Loss +200 (Dr). -> Loss
-
                     const adjEntry = {
                         id: now + index * 2,
                         date: dateStr,
                         account: item.account,
-                        amount: item.diff, // Adjust TWD balance
-                        currencyAmount: 0, // CRITICAL: Do not change foreign quantity
-                        currency: evalCurrency, // Tag it so we know source
+                        amount: item.diff, 
+                        currencyAmount: 0, 
+                        currency: evalCurrency,
                         exchangeRate: parseFloat(evalRate),
                         description: `期末評價-${evalCurrency} @ ${evalRate}`
                     };
@@ -641,8 +610,8 @@
                     const contraEntry = {
                         id: now + index * 2 + 1,
                         date: dateStr,
-                        account: evalGainLossAccount, // "匯兌損益"
-                        amount: -item.diff, // Balancing entry
+                        account: evalGainLossAccount, 
+                        amount: -item.diff, 
                         currencyAmount: 0,
                         currency: evalCurrency,
                         exchangeRate: parseFloat(evalRate),
@@ -654,7 +623,7 @@
 
                 setEntries([...newEntries, ...entries]);
                 alert("評價完成！");
-                setEvalRate(""); // Reset
+                setEvalRate(""); 
             };
 
 
@@ -672,7 +641,6 @@
                             <span>新增交易</span>
                         </h3>
                         <form onSubmit={handleAddEntry} className="space-y-5">
-                            {/* Form fields remain the same as previous step */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1">
                                     <label className="text-xs font-medium text-slate-400 ml-1">日期</label>
@@ -765,53 +733,75 @@
                              </div>
                         </div>
 
-                        {filteredEntries.slice(0, 50).map(entry => (
-                            <div key={entry.id} className="bg-white p-4 rounded-2xl border border-slate-50 flex justify-between items-center transition-all hover:shadow-md">
-                                {editingId === entry.id ? (
-                                    <div className="flex flex-col w-full gap-3">
-                                        <input type="text" value={editDescription} onChange={e => setEditDescription(e.target.value)} className="w-full border p-2 rounded-lg text-sm bg-slate-50" placeholder="摘要" />
-                                        <div className="flex gap-2">
-                                            <select value={editCurrency} onChange={e => setEditCurrency(e.target.value)} className="border p-2 rounded-lg text-sm">
-                                                {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                                            </select>
-                                            <input type="number" value={editExchangeRate} onChange={e => setEditExchangeRate(e.target.value)} className="w-20 border p-2 rounded-lg text-sm" placeholder="匯率" disabled={editCurrency==='TWD'} />
-                                        </div>
-                                        <div className="flex items-center justify-between gap-3">
-                                            <input type="number" value={editAmount} onChange={e => setEditAmount(e.target.value)} className="w-full border p-2 rounded-lg text-sm text-right font-mono" placeholder="金額" />
+                        {filteredEntries.slice(0, 50).map(entry => {
+                            // 檢查是否為外幣評價分錄 (非台幣 且 外幣金額為0 且 台幣金額不為0)
+                            const isFxReval = entry.currency && entry.currency !== 'TWD' && entry.currencyAmount === 0 && entry.amount !== 0;
+                            
+                            return (
+                                <div key={entry.id} className="bg-white p-4 rounded-2xl border border-slate-50 flex justify-between items-center transition-all hover:shadow-md">
+                                    {editingId === entry.id ? (
+                                        <div className="flex flex-col w-full gap-3">
+                                            <input type="text" value={editDescription} onChange={e => setEditDescription(e.target.value)} className="w-full border p-2 rounded-lg text-sm bg-slate-50" placeholder="摘要" />
                                             <div className="flex gap-2">
-                                                <button onClick={() => saveEditing(entry.id)} className="bg-slate-100 text-slate-600 p-2 rounded-lg"><Icons.Check /></button>
-                                                <button onClick={cancelEditing} className="bg-slate-100 text-slate-500 p-2 rounded-lg"><Icons.X /></button>
+                                                <select value={editCurrency} onChange={e => setEditCurrency(e.target.value)} className="border p-2 rounded-lg text-sm">
+                                                    {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                                </select>
+                                                <input type="number" value={editExchangeRate} onChange={e => setEditExchangeRate(e.target.value)} className="w-20 border p-2 rounded-lg text-sm" placeholder="匯率" disabled={editCurrency==='TWD'} />
+                                            </div>
+                                            <div className="flex items-center justify-between gap-3">
+                                                <input type="number" value={editAmount} onChange={e => setEditAmount(e.target.value)} className="w-full border p-2 rounded-lg text-sm text-right font-mono" placeholder="金額" />
+                                                <div className="flex gap-2">
+                                                    <button onClick={() => saveEditing(entry.id)} className="bg-slate-100 text-slate-600 p-2 rounded-lg"><Icons.Check /></button>
+                                                    <button onClick={cancelEditing} className="bg-slate-100 text-slate-500 p-2 rounded-lg"><Icons.X /></button>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                ) : (
-                                    <React.Fragment>
-                                        <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                                <span className="text-[10px] text-slate-400 font-medium bg-slate-50 px-2 py-0.5 rounded-full">{entry.date.slice(5)}</span>
-                                                <span className={`text-[11px] px-2 py-0.5 rounded-md font-medium truncate max-w-[180px] ${getAccountStyle(entry.account)}`}>{entry.account}</span>
+                                    ) : (
+                                        <React.Fragment>
+                                            <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className="text-[10px] text-slate-400 font-medium bg-slate-50 px-2 py-0.5 rounded-full">{entry.date.slice(5)}</span>
+                                                    <span className={`text-[11px] px-2 py-0.5 rounded-md font-medium truncate max-w-[180px] ${getAccountStyle(entry.account)}`}>{entry.account}</span>
+                                                </div>
+                                                <span className="text-sm text-slate-600 truncate pl-1">{entry.description || '-'}</span>
                                             </div>
-                                            <span className="text-sm text-slate-600 truncate pl-1">{entry.description || '-'}</span>
-                                        </div>
-                                        <div className="flex flex-col items-end gap-1 pl-3">
-                                            <span className={`text-base font-mono font-bold ${entry.amount >= 0 ? 'text-asset' : 'text-liab'}`}>
-                                                {entry.currency && entry.currency !== 'TWD' ? `${entry.currency} ` : ''}
-                                                {(entry.currencyAmount || Math.abs(entry.amount)).toLocaleString()}
-                                            </span>
-                                            {entry.currency && entry.currency !== 'TWD' && (
-                                                <span className="text-[10px] text-slate-400">
-                                                    (NT$ {Math.abs(entry.amount).toLocaleString()})
+                                            <div className="flex flex-col items-end gap-1 pl-3">
+                                                <span className={`text-base font-mono font-bold ${entry.amount >= 0 ? 'text-asset' : 'text-liab'}`}>
+                                                    {/* 若為評價分錄，主金額顯示台幣；否則顯示外幣 */}
+                                                    {isFxReval 
+                                                        ? `NT$ ${Math.abs(entry.amount).toLocaleString()}`
+                                                        : (
+                                                            <>
+                                                                {entry.currency && entry.currency !== 'TWD' ? `${entry.currency} ` : ''}
+                                                                {(entry.currencyAmount || Math.abs(entry.amount)).toLocaleString()}
+                                                            </>
+                                                        )
+                                                    }
                                                 </span>
-                                            )}
-                                            <div className="flex gap-3 opacity-30 hover:opacity-100 transition-opacity">
-                                                <button onClick={() => startEditing(entry)} className="text-slate-400 hover:text-slate-600"><Icons.Edit /></button>
-                                                <button onClick={() => handleDeleteEntry(entry.id)} className="text-slate-400 hover:text-rose-400"><Icons.Trash /></button>
+                                                
+                                                {/* 副標題邏輯 */}
+                                                {entry.currency && entry.currency !== 'TWD' && !isFxReval && (
+                                                    <span className="text-[10px] text-slate-400">
+                                                        (NT$ {Math.abs(entry.amount).toLocaleString()})
+                                                    </span>
+                                                )}
+                                                {/* 評價分錄副標題顯示為 (USD 0) */}
+                                                {isFxReval && (
+                                                    <span className="text-[10px] text-slate-400">
+                                                        ({entry.currency} 0)
+                                                    </span>
+                                                )}
+
+                                                <div className="flex gap-3 opacity-30 hover:opacity-100 transition-opacity">
+                                                    <button onClick={() => startEditing(entry)} className="text-slate-400 hover:text-slate-600"><Icons.Edit /></button>
+                                                    <button onClick={() => handleDeleteEntry(entry.id)} className="text-slate-400 hover:text-rose-400"><Icons.Trash /></button>
+                                                </div>
                                             </div>
-                                        </div>
-                                    </React.Fragment>
-                                )}
-                            </div>
-                        ))}
+                                        </React.Fragment>
+                                    )}
+                                </div>
+                            );
+                        })}
                         {filteredEntries.length === 0 && (
                             <div className="text-center py-12 text-slate-400 text-sm bg-white rounded-2xl border border-slate-100 border-dashed">
                                 {filterAccount ? `查無「${filterAccount}」的交易紀錄` : '目前沒有交易紀錄'}
@@ -897,6 +887,11 @@
                 </div>
             );
 
+            // ... renderAccounts and renderSettings remain the same ...
+            // (Re-declaring them here to maintain file completeness if needed, but for diff clarity they are unchanged)
+            
+            // --- UI Renders (Part 2) ---
+            
             const renderAccounts = () => {
                 const sectionStyle = (key) => {
                     if (key === 'ASSETS' || key === 'INCOME') return { header: 'text-blue-700 bg-blue-50', icon: 'bg-blue-500 text-white' };
@@ -927,7 +922,6 @@
                 </div>
             )};
             
-            // --- 更新後的設定頁面 render ---
             const renderSettings = () => {
                 const renderBalanceInput = (acc, isLiability) => {
                     const meta = openingBalanceMeta[acc] || { currency: 'TWD', amount: 0, rate: 1 };
@@ -1096,7 +1090,8 @@
                                     <span className="text-slate-400 bg-white p-2 rounded-full"><Icons.FileText /></span>
                                 </button>
                             </div>
-
+                            
+                             {/* ... Import buttons ... */}
                             <div className="border-t border-slate-100 pt-5 space-y-2">
                                 <div className="flex justify-between items-center mb-2">
                                     <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">資料匯入</h4>
@@ -1146,8 +1141,8 @@
                         {activeTab === 'accounts' && renderAccounts()}
                         {activeTab === 'settings' && renderSettings()}
                     </div>
-
-                    <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-slate-200 px-6 py-2 pb-6 safe-area-bottom flex justify-between items-center shadow-[0_-4px_20px_-5px_rgba(0,0,0,0.05)] z-20">
+                    {/* ... Navigation ... */}
+                     <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-slate-200 px-6 py-2 pb-6 safe-area-bottom flex justify-between items-center shadow-[0_-4px_20px_-5px_rgba(0,0,0,0.05)] z-20">
                         <button onClick={() => setActiveTab('journal')} className={`flex flex-col items-center gap-1 tab-btn ${activeTab === 'journal' ? 'tab-active' : 'tab-inactive'}`}>
                             <div className="p-1"><Icons.Plus /></div>
                             <span className="text-[10px]">記帳</span>
