@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='120' fill='%232563eb'/%3E%3Cpath d='M368 160H144c-26.5 0-48 21.5-48 48v224h272V208c0-26.5-21.5-48-48-48z' fill='%2360a5fa'/%3E%3Cpath d='M368 128H144c-26.5 0-48 21.5-48 48v16h272v-16c0-26.5-21.5-48-48-48z' fill='%2393c5fd'/%3E%3Cpath d='M368 352H144c-17.7 0-32-14.3-32-32s14.3-32 32-32h224v64z' fill='%23ffffff'/%3E%3Cpath d='M320 320a16 16 0 1 1 0 32 16 16 0 1 1 0-32z' fill='%232563eb'/%3E%3C/svg%3E">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='120' fill='%232563eb'/%3E%3Cpath d='M368 160H144c-26.5 0-48 21.5-48 48v224h272V208c0-26.5-21.5-48-48-48z' fill='%2360a5fa'/%3E%3Cpath d='M368 128H144c-26.5 0-48 21.5-48 48v16h272v-16c0-26.5-21.5-48-48-48z' fill='%2393c5fd'/%3E%3Cpath d='M368 352H144c-17.7 0-32-14.3-32-32s14.3-32 32-32h224v64z' fill='%23ffffff'/%3E%3Cpath d='M320 320a16 16 0 1 1 0 32 16 16 0 1 1 0-32z' fill='%232563eb'/%3E%3C/svg%3E">
 
-    <title>個人會計記帳系統 </title>
+    <title>個人會計記帳系統</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
@@ -147,7 +147,10 @@
             const [activeTab, setActiveTab] = useState("journal"); 
             const [categories, setCategories] = useStickyState(DEFAULT_CATEGORIES, "my_app_categories_v2");
             const [entries, setEntries] = useStickyState([], "my_app_entries_v2");
+            // openingBalances 維持只存 TWD 金額，以保持運算兼容性
             const [openingBalances, setOpeningBalances] = useStickyState(DEFAULT_OPENING_BALANCES, "my_app_opening_balances_v2");
+            // 新增: 儲存期初餘額的詳細資訊 (幣別、原幣金額、匯率)
+            const [openingBalanceMeta, setOpeningBalanceMeta] = useStickyState({}, "my_app_opening_meta_v1");
             
             const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
             const [drAccount, setDrAccount] = useState("");
@@ -176,7 +179,7 @@
 
             useEffect(() => {
                 if (window.lucide) window.lucide.createIcons();
-            }, [activeTab, categories, entries, filterAccount, editingId, currency, editCurrency]);
+            }, [activeTab, categories, entries, filterAccount, editingId, currency, editCurrency, openingBalanceMeta]);
 
             useEffect(() => {
                 if (currency === 'TWD') setExchangeRate(1);
@@ -212,6 +215,40 @@
                 }
             };
             
+            // 處理期初餘額變更
+            const handleOpeningBalanceChange = (acc, field, val) => {
+                // 取得現有的 meta 或預設值
+                const currentMeta = openingBalanceMeta[acc] || { currency: 'TWD', amount: 0, rate: 1 };
+                
+                let newMeta = { ...currentMeta };
+                let newTwdBalance = openingBalances[acc] || 0;
+
+                if (field === 'currency') {
+                    newMeta.currency = val;
+                    if (val === 'TWD') {
+                        newMeta.rate = 1;
+                        // 如果切回 TWD，將原本的 TWD 餘額視為原幣
+                        newMeta.amount = newTwdBalance; 
+                    }
+                } else if (field === 'amount') { // 原幣金額
+                    newMeta.amount = parseFloat(val);
+                } else if (field === 'rate') { // 匯率
+                    newMeta.rate = parseFloat(val);
+                } else if (field === 'twd_direct') { // 直接修改 TWD (當幣別是 TWD 時)
+                    newTwdBalance = parseFloat(val);
+                    newMeta.amount = newTwdBalance; // TWD 模式下，原幣=台幣
+                }
+
+                // 計算台幣餘額 (如果不是直接修改 TWD)
+                if (field !== 'twd_direct' && newMeta.currency !== 'TWD') {
+                    // 四捨五入
+                    newTwdBalance = Math.round((newMeta.amount || 0) * (newMeta.rate || 1));
+                }
+
+                setOpeningBalanceMeta(prev => ({ ...prev, [acc]: newMeta }));
+                setOpeningBalances(prev => ({ ...prev, [acc]: newTwdBalance }));
+            };
+
             const handleAddEntry = (e) => {
                 e.preventDefault();
                 if (!drAccount || !crAccount || !amount) {
@@ -344,7 +381,7 @@
             };
 
             const exportToJSON = () => {
-                const data = { categories, entries, openingBalances, exportDate: new Date().toISOString(), appVersion: "2023_V3_Currency" };
+                const data = { categories, entries, openingBalances, openingBalanceMeta, exportDate: new Date().toISOString(), appVersion: "2023_V4_Meta" };
                 const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');
@@ -383,6 +420,7 @@
                             setCategories(importedData.categories);
                             setEntries(importedData.entries);
                             setOpeningBalances(importedData.openingBalances);
+                            setOpeningBalanceMeta(importedData.openingBalanceMeta || {}); // 相容舊版
                             alert("還原成功！");
                         }
                     } catch (error) {
@@ -457,29 +495,33 @@
 
             // 計算資產負債表資料 (包含外幣餘額計算)
             const bsData = useMemo(() => {
-                // 1. 計算外幣累積餘額
+                // 1. 初始化外幣累積餘額 (從期初設定開始)
                 const foreignBalances = {}; // { "科目名": { "USD": 100, "JPY": 5000 } }
 
+                // 載入期初外幣
+                Object.entries(openingBalanceMeta).forEach(([acc, meta]) => {
+                    if (meta.currency && meta.currency !== 'TWD' && meta.amount) {
+                         if (!foreignBalances[acc]) foreignBalances[acc] = {};
+                         foreignBalances[acc][meta.currency] = meta.amount;
+                    }
+                });
+
+                // 2. 加上交易變動
                 entries.forEach(e => {
                     if (e.currency && e.currency !== 'TWD') {
                         if (!foreignBalances[e.account]) foreignBalances[e.account] = {};
-                        // 確保加減方向正確：
-                        // 如果 e.amount 是正 (借方)，則外幣增加
-                        // 如果 e.amount 是負 (貸方)，則外幣減少
                         const sign = e.amount >= 0 ? 1 : -1;
                         const val = (e.currencyAmount || 0) * sign;
                         foreignBalances[e.account][e.currency] = (foreignBalances[e.account][e.currency] || 0) + val;
                     }
                 });
 
-                // 2. 輔助函式：將外幣資訊附加到科目物件上
                 const enrichAccount = (acc) => {
                     const foreign = foreignBalances[acc.name];
                     let foreignStr = "";
                     if (foreign) {
                         const parts = [];
                         Object.entries(foreign).forEach(([curr, amt]) => {
-                            // 只顯示金額大於 0.1 的幣別，避免浮點數誤差顯示 0.000001
                             if (Math.abs(amt) > 0.1) parts.push(`${curr} ${amt.toLocaleString()}`);
                         });
                         if (parts.length > 0) foreignStr = parts.join(", ");
@@ -501,7 +543,7 @@
                     totalDisplayLiab: -totalLiabilities,
                     equity: netIncome
                 };
-            }, [currentBalances, entries, categories]);
+            }, [currentBalances, entries, categories, openingBalanceMeta]);
 
             const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7));
             const isData = useMemo(() => {
@@ -535,7 +577,7 @@
                             <span>新增交易</span>
                         </h3>
                         <form onSubmit={handleAddEntry} className="space-y-5">
-                            {/* 第一行：日期 與 金額 */}
+                            {/* Form fields remain the same as previous step */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1">
                                     <label className="text-xs font-medium text-slate-400 ml-1">日期</label>
@@ -546,8 +588,6 @@
                                     <input type="number" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" className="w-full p-3 bg-slate-50 border border-transparent rounded-xl text-lg font-bold text-slate-700 transition-all text-right focus:bg-white" required />
                                 </div>
                             </div>
-
-                            {/* 第二行：幣別 與 匯率 (當非台幣時顯示) */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1">
                                     <label className="text-xs font-medium text-slate-400 ml-1 flex items-center gap-1"><Icons.Globe className="w-3 h-3"/> 幣別</label>
@@ -556,7 +596,7 @@
                                     </select>
                                 </div>
                                 <div className="space-y-1 relative">
-                                    <label className="text-xs font-medium text-slate-400 ml-1">匯率 (Exchange Rate)</label>
+                                    <label className="text-xs font-medium text-slate-400 ml-1">匯率</label>
                                     <input 
                                         type="number" 
                                         inputMode="decimal" 
@@ -572,8 +612,6 @@
                                     )}
                                 </div>
                             </div>
-                            
-                            {/* 第三行：借貸方 */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1">
                                     <label className="text-xs font-medium text-slate-400 ml-1 flex items-center gap-1">
@@ -600,7 +638,6 @@
                                     </select>
                                 </div>
                             </div>
-
                             <div className="flex gap-3 items-end">
                                 <div className="flex-1 space-y-1">
                                     <label className="text-xs font-medium text-slate-400 ml-1">摘要</label>
@@ -666,7 +703,6 @@
                                                 {entry.currency && entry.currency !== 'TWD' ? `${entry.currency} ` : ''}
                                                 {(entry.currencyAmount || Math.abs(entry.amount)).toLocaleString()}
                                             </span>
-                                            {/* 若為外幣，顯示台幣參考值 */}
                                             {entry.currency && entry.currency !== 'TWD' && (
                                                 <span className="text-[10px] text-slate-400">
                                                     (NT$ {Math.abs(entry.amount).toLocaleString()})
@@ -796,34 +832,87 @@
                 </div>
             )};
             
-            const renderSettings = () => (
+            // --- 更新後的設定頁面 render ---
+            const renderSettings = () => {
+                const renderBalanceInput = (acc, isLiability) => {
+                    const meta = openingBalanceMeta[acc] || { currency: 'TWD', amount: 0, rate: 1 };
+                    const isForeign = meta.currency !== 'TWD';
+                    const twdBalance = openingBalances[acc] !== undefined ? openingBalances[acc] : 0;
+
+                    return (
+                        <div key={acc} className="py-3 border-b border-slate-50 last:border-0">
+                            <div className="flex justify-between items-center mb-2">
+                                <label className="text-sm text-slate-700 font-medium">{acc}</label>
+                                <select 
+                                    value={meta.currency} 
+                                    onChange={(e) => handleOpeningBalanceChange(acc, 'currency', e.target.value)}
+                                    className="text-xs border rounded-lg p-1 bg-slate-50 text-slate-600"
+                                >
+                                    {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                            </div>
+                            
+                            {isForeign ? (
+                                <div className="flex items-center gap-2">
+                                    <div className="flex-1 space-y-1">
+                                        <label className="text-[10px] text-slate-400 block">原幣金額</label>
+                                        <input 
+                                            type="number" 
+                                            value={meta.amount || ''} 
+                                            onChange={(e) => handleOpeningBalanceChange(acc, 'amount', e.target.value)}
+                                            className="w-full border rounded-lg p-1.5 text-sm font-mono text-right bg-slate-50 focus:bg-white" 
+                                            placeholder="原幣" 
+                                        />
+                                    </div>
+                                    <div className="w-20 space-y-1">
+                                        <label className="text-[10px] text-slate-400 block">匯率</label>
+                                        <input 
+                                            type="number" 
+                                            value={meta.rate || ''} 
+                                            onChange={(e) => handleOpeningBalanceChange(acc, 'rate', e.target.value)}
+                                            className="w-full border rounded-lg p-1.5 text-sm font-mono text-right bg-slate-50 focus:bg-white" 
+                                            placeholder="匯率" 
+                                        />
+                                    </div>
+                                    <div className="w-24 text-right pt-4">
+                                        <span className={`text-xs font-mono ${isLiability ? 'text-liab' : 'text-slate-500'}`}>
+                                            ≈ ${twdBalance.toLocaleString()}
+                                        </span>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="flex justify-end">
+                                    <input 
+                                        type="number" 
+                                        value={twdBalance} 
+                                        onChange={(e) => handleOpeningBalanceChange(acc, 'twd_direct', e.target.value)} 
+                                        className={`border rounded-lg p-1.5 text-sm w-32 text-right font-mono bg-slate-50 focus:bg-white transition-colors ${isLiability ? 'text-liab' : ''}`} 
+                                        placeholder="0" 
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    );
+                };
+
+                return (
                 <div className="space-y-6 pb-28">
                     <div className="bg-white p-5 rounded-2xl border border-slate-100 card-shadow">
-                        <h3 className="font-bold text-slate-700 mb-5 flex items-center gap-2"><Icons.Wallet /> 期初餘額設定 (2023/01/01)</h3>
+                        <h3 className="font-bold text-slate-700 mb-5 flex items-center gap-2"><Icons.Wallet /> 期初餘額設定 (2026/01/30)</h3>
                         
                         <div className="space-y-6">
                             <div>
                                 <h4 className="text-xs font-bold text-blue-700 bg-blue-50 p-2 rounded-lg mb-3 inline-block px-3">資產 (Assets)</h4>
-                                <div className="space-y-3 pl-1">
-                                    {categories.ASSETS.map(acc => (
-                                        <div key={acc} className="flex justify-between items-center border-b border-slate-50 last:border-0 pb-2">
-                                            <label className="text-xs text-slate-600 flex-1">{acc}</label>
-                                            <input type="number" value={openingBalances[acc] !== undefined ? openingBalances[acc] : 0} onChange={e => setOpeningBalances({...openingBalances, [acc]: parseFloat(e.target.value) || 0})} className="border rounded-lg p-1.5 text-sm w-32 text-right font-mono bg-slate-50 focus:bg-white transition-colors" placeholder="0" />
-                                        </div>
-                                    ))}
+                                <div className="pl-1">
+                                    {categories.ASSETS.map(acc => renderBalanceInput(acc, false))}
                                 </div>
                             </div>
 
                             <div>
                                 <h4 className="text-xs font-bold text-amber-700 bg-amber-50 p-2 rounded-lg mb-3 inline-block px-3">負債 (Liabilities)</h4>
                                 <p className="text-[10px] text-slate-400 mb-2 px-1">* 請輸入負數表示欠款</p>
-                                <div className="space-y-3 pl-1">
-                                    {categories.LIABILITIES.map(acc => (
-                                        <div key={acc} className="flex justify-between items-center border-b border-slate-50 last:border-0 pb-2">
-                                            <label className="text-xs text-slate-600 flex-1">{acc}</label>
-                                            <input type="number" value={openingBalances[acc] !== undefined ? openingBalances[acc] : 0} onChange={e => setOpeningBalances({...openingBalances, [acc]: parseFloat(e.target.value) || 0})} className="border rounded-lg p-1.5 text-sm w-32 text-right font-mono bg-slate-50 focus:bg-white text-amber-600 transition-colors" placeholder="0" />
-                                        </div>
-                                    ))}
+                                <div className="pl-1">
+                                    {categories.LIABILITIES.map(acc => renderBalanceInput(acc, true))}
                                 </div>
                             </div>
                         </div>
@@ -889,7 +978,7 @@
                         </div>
                     </div>
                 </div>
-            );
+            )};
 
             return (
                 <div className="min-h-screen safe-area-bottom pb-20">
