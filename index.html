@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='120' fill='%232563eb'/%3E%3Cpath d='M368 160H144c-26.5 0-48 21.5-48 48v224h272V208c0-26.5-21.5-48-48-48z' fill='%2360a5fa'/%3E%3Cpath d='M368 128H144c-26.5 0-48 21.5-48 48v16h272v-16c0-26.5-21.5-48-48-48z' fill='%2393c5fd'/%3E%3Cpath d='M368 352H144c-17.7 0-32-14.3-32-32s14.3-32 32-32h224v64z' fill='%23ffffff'/%3E%3Cpath d='M320 320a16 16 0 1 1 0 32 16 16 0 1 1 0-32z' fill='%232563eb'/%3E%3C/svg%3E">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='120' fill='%232563eb'/%3E%3Cpath d='M368 160H144c-26.5 0-48 21.5-48 48v224h272V208c0-26.5-21.5-48-48-48z' fill='%2360a5fa'/%3E%3Cpath d='M368 128H144c-26.5 0-48 21.5-48 48v16h272v-16c0-26.5-21.5-48-48-48z' fill='%2393c5fd'/%3E%3Cpath d='M368 352H144c-17.7 0-32-14.3-32-32s14.3-32 32-32h224v64z' fill='%23ffffff'/%3E%3Cpath d='M320 320a16 16 0 1 1 0 32 16 16 0 1 1 0-32z' fill='%232563eb'/%3E%3C/svg%3E">
 
-    <title>個人會計記帳系統</title>
+    <title>個人會計記帳系統 </title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
@@ -170,6 +170,8 @@
             const [editAmount, setEditAmount] = useState("");
             const [editCurrency, setEditCurrency] = useState("TWD");
             const [editExchangeRate, setEditExchangeRate] = useState(1);
+            const [editDate, setEditDate] = useState("");
+            const [editAccount, setEditAccount] = useState("");
             
             const [filterAccount, setFilterAccount] = useState("");
 
@@ -297,12 +299,16 @@
                 setEditAmount(val);
                 setEditCurrency(entry.currency || 'TWD');
                 setEditExchangeRate(entry.exchangeRate || 1);
+                setEditDate(entry.date);
+                setEditAccount(entry.account);
             };
 
             const cancelEditing = () => {
                 setEditingId(null);
                 setEditDescription("");
                 setEditAmount("");
+                setEditDate("");
+                setEditAccount("");
             };
 
             const saveEditing = (id) => {
@@ -316,12 +322,13 @@
 
                 let partnerId = null;
                 const partnerCandidates = entries.filter(e => 
+                    e.id !== id &&
                     Math.abs(e.id - id) <= 5 && 
                     e.date === targetEntry.date && 
                     (e.amount === -targetEntry.amount || (e.currency === targetEntry.currency && e.exchangeRate === targetEntry.exchangeRate))
                 );
                 
-                if (partnerCandidates.length === 1) {
+                if (partnerCandidates.length >= 1) {
                     partnerId = partnerCandidates[0].id;
                 }
 
@@ -329,6 +336,8 @@
                     if (e.id === id) {
                         return { 
                             ...e, 
+                            date: editDate,
+                            account: editAccount,
                             description: editDescription, 
                             amount: finalTwdAmt,
                             currencyAmount: newCurrencyAmt,
@@ -339,6 +348,7 @@
                     if (e.id === partnerId) {
                         return { 
                             ...e, 
+                            date: editDate,
                             description: editDescription, 
                             amount: -finalTwdAmt,
                             currencyAmount: newCurrencyAmt,
@@ -393,7 +403,6 @@
             const exportToCSV = () => {
                 const bom = "\uFEFF";
                 const headers = "ID,日期,會計科目,台幣金額,原幣金額,幣別,匯率,摘要\n";
-                // 修正：當 currencyAmount 為 0 時（評價分錄），應該匯出 0 而不是 fallback 到 amount
                 const rows = entries.map(e => {
                     const foreignAmt = e.currencyAmount !== undefined ? e.currencyAmount : Math.abs(e.amount);
                     return `${e.id},${e.date},${e.account},${e.amount},${foreignAmt},${e.currency || 'TWD'},${e.exchangeRate || 1},"${e.description || ''}"`;
@@ -420,7 +429,7 @@
                             setCategories(importedData.categories);
                             setEntries(importedData.entries);
                             setOpeningBalances(importedData.openingBalances);
-                            setOpeningBalanceMeta(importedData.openingBalanceMeta || {}); // 相容舊版
+                            setOpeningBalanceMeta(importedData.openingBalanceMeta || {});
                             alert("還原成功！");
                         }
                     } catch (error) {
@@ -538,7 +547,7 @@
                     liabilities: liabilities.map(l => ({ ...l, amount: -l.amount })),
                     totalDisplayLiab: -totalLiabilities,
                     equity: netIncome,
-                    rawForeignBalances: foreignBalances // Export for revaluation tool
+                    rawForeignBalances: foreignBalances
                 };
             }, [currentBalances, entries, categories, openingBalanceMeta]);
 
@@ -559,7 +568,6 @@
                 return { incomeList, expenseList, totalIncome, totalExpense, netIncome: totalIncome - totalExpense };
             }, [entries, reportMonth, categories]);
 
-            // --- Revaluation Logic ---
             const revaluationPreview = useMemo(() => {
                 if (!evalRate || !evalCurrency) return [];
                 const rate = parseFloat(evalRate);
@@ -626,15 +634,16 @@
                 setEvalRate(""); 
             };
 
-
-            // --- UI Renders ---
-
             const renderJournal = () => {
                 const filteredEntries = filterAccount ? entries.filter(e => e.account === filterAccount) : entries;
+                const sortedEntries = [...filteredEntries].sort((a, b) => {
+                    const dateDiff = new Date(b.date) - new Date(a.date);
+                    if (dateDiff !== 0) return dateDiff;
+                    return b.id - a.id;
+                });
 
                 return (
                 <div className="space-y-6 pb-28">
-                    {/* Add Entry Card */}
                     <div className="bg-white p-6 rounded-2xl border border-slate-100 card-shadow">
                         <h3 className="text-lg font-bold text-slate-700 mb-5 flex items-center gap-2">
                             <div className="bg-slate-100 p-2 rounded-xl text-slate-600"><Icons.Plus /></div> 
@@ -713,7 +722,6 @@
                         </form>
                     </div>
 
-                    {/* Entry List */}
                     <div className="space-y-3">
                         <div className="flex justify-between items-center px-2">
                              <h3 className="font-bold text-slate-600 text-sm">最近交易</h3>
@@ -733,14 +741,22 @@
                              </div>
                         </div>
 
-                        {filteredEntries.slice(0, 50).map(entry => {
-                            // 檢查是否為外幣評價分錄 (非台幣 且 外幣金額為0 且 台幣金額不為0)
+                        {sortedEntries.slice(0, 50).map(entry => {
                             const isFxReval = entry.currency && entry.currency !== 'TWD' && entry.currencyAmount === 0 && entry.amount !== 0;
                             
                             return (
                                 <div key={entry.id} className="bg-white p-4 rounded-2xl border border-slate-50 flex justify-between items-center transition-all hover:shadow-md">
                                     {editingId === entry.id ? (
                                         <div className="flex flex-col w-full gap-3">
+                                            <div className="flex gap-2">
+                                                <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className="border p-2 rounded-lg text-sm bg-slate-50 w-36" />
+                                                <select value={editAccount} onChange={e => setEditAccount(e.target.value)} className="w-full border p-2 rounded-lg text-sm bg-slate-50">
+                                                    <optgroup label="資產">{categories.ASSETS.map(a => <option key={a} value={a}>{a}</option>)}</optgroup>
+                                                    <optgroup label="負債">{categories.LIABILITIES.map(a => <option key={a} value={a}>{a}</option>)}</optgroup>
+                                                    <optgroup label="收入">{categories.INCOME.map(a => <option key={a} value={a}>{a}</option>)}</optgroup>
+                                                    <optgroup label="費用">{categories.EXPENSES.map(a => <option key={a} value={a}>{a}</option>)}</optgroup>
+                                                </select>
+                                            </div>
                                             <input type="text" value={editDescription} onChange={e => setEditDescription(e.target.value)} className="w-full border p-2 rounded-lg text-sm bg-slate-50" placeholder="摘要" />
                                             <div className="flex gap-2">
                                                 <select value={editCurrency} onChange={e => setEditCurrency(e.target.value)} className="border p-2 rounded-lg text-sm">
@@ -767,7 +783,6 @@
                                             </div>
                                             <div className="flex flex-col items-end gap-1 pl-3">
                                                 <span className={`text-base font-mono font-bold ${entry.amount >= 0 ? 'text-asset' : 'text-liab'}`}>
-                                                    {/* 若為評價分錄，主金額顯示台幣；否則顯示外幣 */}
                                                     {isFxReval 
                                                         ? `NT$ ${Math.abs(entry.amount).toLocaleString()}`
                                                         : (
@@ -779,13 +794,11 @@
                                                     }
                                                 </span>
                                                 
-                                                {/* 副標題邏輯 */}
                                                 {entry.currency && entry.currency !== 'TWD' && !isFxReval && (
                                                     <span className="text-[10px] text-slate-400">
                                                         (NT$ {Math.abs(entry.amount).toLocaleString()})
                                                     </span>
                                                 )}
-                                                {/* 評價分錄副標題顯示為 (USD 0) */}
                                                 {isFxReval && (
                                                     <span className="text-[10px] text-slate-400">
                                                         ({entry.currency} 0)
@@ -832,7 +845,6 @@
                                 <span className={`font-bold font-mono text-base ${bsData.equity >= 0 ? 'text-asset' : 'text-liab'}`}>{bsData.equity.toLocaleString()}</span>
                             </div>
                             
-                            {/* 資產明細 */}
                             <div className="mt-6 pt-2">
                                 <h4 className="text-xs font-bold text-slate-400 uppercase mb-3 ml-1 tracking-wider">資產明細</h4>
                                 {bsData.assets.map(a => (
@@ -846,7 +858,6 @@
                                 ))}
                             </div>
 
-                            {/* 負債明細 */}
                             <div className="mt-6 pt-2">
                                 <h4 className="text-xs font-bold text-slate-400 uppercase mb-3 ml-1 tracking-wider">負債明細</h4>
                                 {bsData.liabilities.length > 0 ? (
@@ -887,11 +898,6 @@
                 </div>
             );
 
-            // ... renderAccounts and renderSettings remain the same ...
-            // (Re-declaring them here to maintain file completeness if needed, but for diff clarity they are unchanged)
-            
-            // --- UI Renders (Part 2) ---
-            
             const renderAccounts = () => {
                 const sectionStyle = (key) => {
                     if (key === 'ASSETS' || key === 'INCOME') return { header: 'text-blue-700 bg-blue-50', icon: 'bg-blue-500 text-white' };
@@ -987,7 +993,7 @@
                 return (
                 <div className="space-y-6 pb-28">
                     <div className="bg-white p-5 rounded-2xl border border-slate-100 card-shadow">
-                        <h3 className="font-bold text-slate-700 mb-5 flex items-center gap-2"><Icons.Wallet /> 期初餘額設定</h3>
+                        <h3 className="font-bold text-slate-700 mb-5 flex items-center gap-2"><Icons.Wallet /> 期初餘額設定 (2023/01/01)</h3>
                         <div className="space-y-6">
                             <div>
                                 <h4 className="text-xs font-bold text-blue-700 bg-blue-50 p-2 rounded-lg mb-3 inline-block px-3">資產 (Assets)</h4>
