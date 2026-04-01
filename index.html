@@ -100,33 +100,37 @@
             ASSETS: [
                 "現金-錢包-台幣", "現金-Line-台幣", "現金-悠遊卡-台新", "現金-悠遊卡-花旗",
                 "銀行存款-渣打-台幣", "銀行存款-台新-台幣", "銀行存款-國泰-台幣", "銀行存款-國泰-外幣", "銀行存款-元大-台幣",
+                "應收帳款-公司-美甲社", "應收帳款-私人-媽媽", "應收帳款-私人-瑋",
                 "股票投資-台股-成本", "股票投資-台股-評價",
+                "儲蓄險-祿美利利-外幣", "儲蓄險-雋美年年-外幣", "儲蓄險-樂事年年-台幣", "儲蓄險-祿美佳-外幣",
+                "預付款項-健身教練", "預付款項-羽球場", "預付款項-麥當勞"
             ],
             LIABILITIES: [
                 "信用卡-台新-Richart", "信用卡-國泰-蝦皮/koko", "信用卡-花旗-現金回饋", "信用卡-富邦-momo", "信用卡-元大-鑽金",
-                "應付帳款-其他", "未實現-台股-評價"
+                "應付帳款-Brian", "應付帳款-其他", "未實現-台股-評價"
             ],
             INCOME: [
                 "薪資", "利息收入", "股利收入", "獎金", "投資收益", "其他收入", "匯兌損益"
             ],
             EXPENSES: [
                 "租金支出-房租管理費", "租金支出-水費", "租金支出-電費",
-                "伙食費", "保險費", "交際費", "交通費", "電話費", "生活用品", "運動健康",
+                "伙食費", "保險費", "外在支出-彩妝保養", "外在支出-服裝飾品",
+                "交際費", "交通費", "電話費", "生活用品", "運動健康",
                 "旅遊-機加酒", "旅遊-伙食", "旅遊-交通", "旅遊-購物&其他",
                 "醫療費", "雜費", "匯兌損益"
             ]
         };
 
         const DEFAULT_OPENING_BALANCES = {
-            "現金-錢包-台幣": 0,
-            "現金-Line-台幣": 0,
-            "現金-悠遊卡-台新": 0,
-            "現金-悠遊卡-花旗": 0,
-            "銀行存款-渣打-台幣": 0,
-            "信用卡-台新-Richart": -0,
-            "信用卡-國泰-蝦皮/koko": -0,
-            "信用卡-花旗-現金回饋": -0,
-            "信用卡-富邦-momo": -0
+            "現金-錢包-台幣": 1260,
+            "現金-Line-台幣": 6129,
+            "現金-悠遊卡-台新": 335,
+            "現金-悠遊卡-花旗": 493,
+            "銀行存款-渣打-台幣": 112247,
+            "信用卡-台新-Richart": -7506,
+            "信用卡-國泰-蝦皮/koko": -69,
+            "信用卡-花旗-現金回饋": -29610,
+            "信用卡-富邦-momo": -21168
         };
 
         const useStickyState = (defaultValue, key) => {
@@ -251,8 +255,8 @@
                     alert("請完整填寫交易資訊");
                     return;
                 }
-                const numCurrencyAmount = parseFloat(amount);
-                const numExchangeRate = parseFloat(exchangeRate);
+                const numCurrencyAmount = parseFloat(amount) || 0;
+                const numExchangeRate = parseFloat(exchangeRate) || 1;
                 const numTwdAmount = Math.round(numCurrencyAmount * numExchangeRate); 
 
                 const id = Date.now();
@@ -289,9 +293,13 @@
             };
 
             const startEditing = (entry) => {
+                // 檢查是否為評價分錄：非台幣、外幣數量為 0 且台幣數量不為 0
+                const isFxReval = entry.currency && entry.currency !== 'TWD' && entry.currencyAmount === 0 && entry.amount !== 0;
+                
                 setEditingId(entry.id);
                 setEditDescription(entry.description || "");
-                const val = entry.currencyAmount !== undefined ? entry.currencyAmount : Math.abs(entry.amount);
+                // 若為評價分錄，因為外幣是0，顯示台幣差額讓使用者改；否則顯示外幣金額
+                const val = isFxReval ? Math.abs(entry.amount) : (entry.currencyAmount !== undefined ? entry.currencyAmount : Math.abs(entry.amount));
                 setEditAmount(val);
                 setEditCurrency(entry.currency || 'TWD');
                 setEditExchangeRate(entry.exchangeRate || 1);
@@ -311,9 +319,21 @@
                 const targetEntry = entries.find(e => e.id === id);
                 if (!targetEntry) return;
 
-                const newCurrencyAmt = parseFloat(editAmount);
-                const newRate = parseFloat(editExchangeRate);
-                const newTwdAmt = Math.round(newCurrencyAmt * newRate);
+                // 判斷原分錄是否為評價分錄
+                const isFxReval = targetEntry.currency !== 'TWD' && targetEntry.currencyAmount === 0 && targetEntry.amount !== 0;
+
+                let newCurrencyAmt = parseFloat(editAmount) || 0;
+                const newRate = parseFloat(editExchangeRate) || 1;
+                let newTwdAmt;
+
+                // 如果是評價分錄，使用者輸入的 editAmount 是「台幣差額」，且外幣需維持為 0
+                if (isFxReval) {
+                    newTwdAmt = Math.abs(newCurrencyAmt);
+                    newCurrencyAmt = 0; // 評價分錄不影響原幣數量
+                } else {
+                    newTwdAmt = Math.round(newCurrencyAmt * newRate);
+                }
+
                 const finalTwdAmt = targetEntry.amount >= 0 ? newTwdAmt : -newTwdAmt;
 
                 let partnerId = null;
@@ -321,7 +341,7 @@
                     e.id !== id &&
                     Math.abs(e.id - id) <= 5 && 
                     e.date === targetEntry.date && 
-                    (e.amount === -targetEntry.amount || (e.currency === targetEntry.currency && e.exchangeRate === targetEntry.exchangeRate))
+                    (e.amount === -targetEntry.amount || (e.currency === targetEntry.currency && e.exchangeRate === targetEntry.exchangeRate && e.currencyAmount === targetEntry.currencyAmount))
                 );
                 
                 if (partnerCandidates.length >= 1) {
@@ -653,7 +673,7 @@
                                 </div>
                                 <div className="space-y-1">
                                     <label className="text-xs font-medium text-slate-400 ml-1">金額 (原幣)</label>
-                                    <input type="number" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" className="w-full p-3 bg-slate-50 border border-transparent rounded-xl text-lg font-bold text-slate-700 transition-all text-right focus:bg-white" required />
+                                    <input type="number" step="any" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" className="w-full p-3 bg-slate-50 border border-transparent rounded-xl text-lg font-bold text-slate-700 transition-all text-right focus:bg-white" required />
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
@@ -667,6 +687,7 @@
                                     <label className="text-xs font-medium text-slate-400 ml-1">匯率</label>
                                     <input 
                                         type="number" 
+                                        step="any"
                                         inputMode="decimal" 
                                         value={exchangeRate} 
                                         onChange={e => setExchangeRate(e.target.value)} 
@@ -758,11 +779,14 @@
                                                 <select value={editCurrency} onChange={e => setEditCurrency(e.target.value)} className="border p-2 rounded-lg text-sm">
                                                     {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                                                 </select>
-                                                <input type="number" value={editExchangeRate} onChange={e => setEditExchangeRate(e.target.value)} className="w-20 border p-2 rounded-lg text-sm" placeholder="匯率" disabled={editCurrency==='TWD'} />
+                                                <input type="number" step="any" value={editExchangeRate} onChange={e => setEditExchangeRate(e.target.value)} className="w-20 border p-2 rounded-lg text-sm" placeholder="匯率" disabled={editCurrency==='TWD'} />
                                             </div>
                                             <div className="flex items-center justify-between gap-3">
-                                                <input type="number" value={editAmount} onChange={e => setEditAmount(e.target.value)} className="w-full border p-2 rounded-lg text-sm text-right font-mono" placeholder="金額" />
-                                                <div className="flex gap-2">
+                                                <div className="relative w-full">
+                                                    <input type="number" step="any" value={editAmount} onChange={e => setEditAmount(e.target.value)} className="w-full border p-2 rounded-lg text-sm text-right font-mono" placeholder={isFxReval ? "台幣差額" : "金額 (原幣)"} />
+                                                    {isFxReval && <span className="absolute left-2 top-2 text-[10px] text-slate-400 bg-white px-1">調整金額 (TWD)</span>}
+                                                </div>
+                                                <div className="flex gap-2 shrink-0">
                                                     <button onClick={() => saveEditing(entry.id)} className="bg-slate-100 text-slate-600 p-2 rounded-lg"><Icons.Check /></button>
                                                     <button onClick={cancelEditing} className="bg-slate-100 text-slate-500 p-2 rounded-lg"><Icons.X /></button>
                                                 </div>
@@ -949,6 +973,7 @@
                                         <label className="text-[10px] text-slate-400 block">原幣金額</label>
                                         <input 
                                             type="number" 
+                                            step="any"
                                             value={meta.amount || ''} 
                                             onChange={(e) => handleOpeningBalanceChange(acc, 'amount', e.target.value)}
                                             className="w-full border rounded-lg p-1.5 text-sm font-mono text-right bg-slate-50 focus:bg-white" 
@@ -959,6 +984,7 @@
                                         <label className="text-[10px] text-slate-400 block">匯率</label>
                                         <input 
                                             type="number" 
+                                            step="any"
                                             value={meta.rate || ''} 
                                             onChange={(e) => handleOpeningBalanceChange(acc, 'rate', e.target.value)}
                                             className="w-full border rounded-lg p-1.5 text-sm font-mono text-right bg-slate-50 focus:bg-white" 
@@ -975,6 +1001,7 @@
                                 <div className="flex justify-end">
                                     <input 
                                         type="number" 
+                                        step="any"
                                         value={twdBalance} 
                                         onChange={(e) => handleOpeningBalanceChange(acc, 'twd_direct', e.target.value)} 
                                         className={`border rounded-lg p-1.5 text-sm w-32 text-right font-mono bg-slate-50 focus:bg-white transition-colors ${isLiability ? 'text-liab' : ''}`} 
@@ -1022,7 +1049,7 @@
                                     </div>
                                     <div>
                                         <label className="text-xs font-bold text-slate-400 block mb-1">當前匯率</label>
-                                        <input type="number" inputMode="decimal" value={evalRate} onChange={e => setEvalRate(e.target.value)} className="w-full p-2 border rounded-lg text-sm bg-white" placeholder="輸入匯率" />
+                                        <input type="number" step="any" inputMode="decimal" value={evalRate} onChange={e => setEvalRate(e.target.value)} className="w-full p-2 border rounded-lg text-sm bg-white" placeholder="輸入匯率" />
                                     </div>
                                 </div>
                                 <div>
@@ -1061,8 +1088,10 @@
                             )}
                             
                             {evalRate && revaluationPreview.length === 0 && (
-                                <div className="text-center text-xs text-slate-400 py-2">
-                                    查無 {evalCurrency} 相關資產
+                                <div className="text-center text-xs text-slate-400 py-3">
+                                    {[...bsData.assets, ...bsData.liabilities.map(l=>({...l, amount: -l.amount}))].some(acc => Math.abs(acc.foreignRaw?.[evalCurrency] || 0) > 0.1) 
+                                        ? "✅ 目前帳面價值與設定匯率相符，無需調整。" 
+                                        : `查無 ${evalCurrency} 相關資產`}
                                 </div>
                             )}
                         </div>
