@@ -336,16 +336,22 @@
 
                 const finalTwdAmt = targetEntry.amount >= 0 ? newTwdAmt : -newTwdAmt;
 
-                let partnerId = null;
+                // 精準尋找對應的借貸分錄 (嚴格配對相反金額與相近 ID)
                 const partnerCandidates = entries.filter(e => 
                     e.id !== id &&
                     Math.abs(e.id - id) <= 5 && 
                     e.date === targetEntry.date && 
-                    (e.amount === -targetEntry.amount || (e.currency === targetEntry.currency && e.exchangeRate === targetEntry.exchangeRate && e.currencyAmount === targetEntry.currencyAmount))
+                    e.amount === -targetEntry.amount
                 );
                 
+                partnerCandidates.sort((a, b) => Math.abs(a.id - id) - Math.abs(b.id - id));
+                
+                let partnerId = null;
+                let descriptionsWereIdentical = false;
+
                 if (partnerCandidates.length >= 1) {
                     partnerId = partnerCandidates[0].id;
+                    descriptionsWereIdentical = targetEntry.description === partnerCandidates[0].description;
                 }
 
                 setEntries(prevEntries => prevEntries.map(e => {
@@ -365,7 +371,8 @@
                         return { 
                             ...e, 
                             date: editDate,
-                            description: editDescription, 
+                            // 若原本摘要相同，則同步更新；若原本不同 (例如評價分錄的兩端)，則保留對方原本獨立的摘要
+                            description: descriptionsWereIdentical ? editDescription : e.description, 
                             amount: -finalTwdAmt,
                             currencyAmount: newCurrencyAmt,
                             currency: editCurrency,
