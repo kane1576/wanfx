@@ -336,7 +336,7 @@
 
                 const finalTwdAmt = targetEntry.amount >= 0 ? newTwdAmt : -newTwdAmt;
 
-                // 精準尋找對應的借貸分錄 (嚴格配對相反金額與相近 ID)
+                // 嚴格配對相反金額的分錄
                 const partnerCandidates = entries.filter(e => 
                     e.id !== id &&
                     Math.abs(e.id - id) <= 5 && 
@@ -344,6 +344,7 @@
                     e.amount === -targetEntry.amount
                 );
                 
+                // 按 ID 距離排序，確保抓到真正的伴侶
                 partnerCandidates.sort((a, b) => Math.abs(a.id - id) - Math.abs(b.id - id));
                 
                 let partnerId = null;
@@ -371,7 +372,7 @@
                         return { 
                             ...e, 
                             date: editDate,
-                            // 若原本摘要相同，則同步更新；若原本不同 (例如評價分錄的兩端)，則保留對方原本獨立的摘要
+                            // 保護原本不同的摘要不互相覆蓋 (如評價分錄的兩端)
                             description: descriptionsWereIdentical ? editDescription : e.description, 
                             amount: -finalTwdAmt,
                             currencyAmount: newCurrencyAmt,
@@ -466,14 +467,19 @@
             const handleImportCSV = (event) => {
                 const files = event.target.files;
                 if (!files || files.length === 0) return;
+                
                 const processFile = (file) => {
                     return new Promise((resolve) => {
                         const reader = new FileReader();
                         reader.onload = (e) => {
-                            const lines = e.target.result.split(/\r\n|\n/);
+                            let content = e.target.result;
+                            
+                            // 防呆 1：移除 Excel 可能產生的 BOM (隱藏字元)
+                            content = content.replace(/^\uFEFF/, '');
+                            
+                            const lines = content.split(/\r\n|\n/);
                             const parsed = [];
                             
-                            // 判斷是否為包含 ID, 幣別 等欄位的新版格式
                             let isNewFormat = false;
                             if (lines.length > 0 && lines[0].startsWith("ID,")) {
                                 isNewFormat = true;
@@ -482,27 +488,39 @@
                             let isHeader = true;
                             lines.forEach((line) => {
                                 if (!line.trim()) return;
-                                // 支援處理欄位內有逗號的情況 (如摘要包含逗號，會被雙引號包住)
+                                
                                 const row = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(s => s.replace(/^"|"$/g, '').trim());
                                 
                                 if (isHeader) {
-                                    if (row[0].includes('日期') || row[0].includes('ID') || row[1]?.includes('會計科目')) { isHeader = false; return; }
+                                    if (row[0].includes('日期') || row[0].includes('ID') || row[1]?.includes('會計科目')) { 
+                                        isHeader = false; 
+                                        return; 
+                                    }
                                     isHeader = false;
                                 }
 
+                                // 防呆 2：日期寬容處理 (自動將 2023/1/1 或 2023-1-1 補齊為 2023-01-01)
+                                let rawDate = isNewFormat ? row[1] : row[0];
+                                if (!rawDate) return;
+                                rawDate = rawDate.replace(/\//g, '-');
+                                let dateParts = rawDate.split('-');
+                                if (dateParts.length === 3) {
+                                    dateParts[1] = dateParts[1].padStart(2, '0');
+                                    dateParts[2] = dateParts[2].padStart(2, '0');
+                                    rawDate = dateParts.join('-');
+                                }
+                                
+                                if (!/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) return;
+
                                 if (isNewFormat) {
-                                    // 讀取新版 8 個欄位格式
                                     if (row.length < 4) return;
                                     const rawId = row[0];
-                                    const date = row[1];
-                                    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-                                    
                                     const amount = parseFloat(row[3]);
                                     if (isNaN(amount)) return;
 
                                     parsed.push({
                                         id: rawId ? parseFloat(rawId) : Date.now() + Math.random(),
-                                        date: date,
+                                        date: rawDate,
                                         account: row[2],
                                         amount: amount,
                                         currencyAmount: parseFloat(row[4]) || 0,
@@ -511,16 +529,13 @@
                                         description: row[7] || ""
                                     });
                                 } else {
-                                    // 讀取舊版 4 個欄位格式
                                     if (row.length < 3) return;
-                                    const date = row[0];
-                                    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
                                     const amount = parseFloat(row[2]);
                                     if (isNaN(amount)) return;
                                     
                                     parsed.push({ 
                                         id: Date.now() + Math.random(), 
-                                        date, 
+                                        date: rawDate, 
                                         account: row[1], 
                                         amount, 
                                         currencyAmount: Math.abs(amount), 
@@ -538,11 +553,12 @@
 
                 Promise.all(Array.from(files).map(processFile)).then((results) => {
                     const allParsed = results.flat();
-                    if (allParsed.length === 0) { alert("匯入失敗：無有效資料"); return; }
+                    if (allParsed.length === 0) { 
+                        alert("匯入失敗：無有效資料。\n可能是 Excel 改變了日期格式，或是編碼不對 (請試著切換 UTF-8 / Big5 看看)。"); 
+                        return; 
+                    }
                     
-                    // 新增對話框，讓使用者選擇「更新」還是「附加」
                     if (confirm(`讀取到 ${allParsed.length} 筆資料。\n\n▶ 按「確定」：以 ID 比對更新現有資料 (Excel 編輯後覆蓋)\n▶ 按「取消」：重新產生 ID，將全部資料當作新紀錄附加`)) {
-                        // 更新覆蓋模式
                         setEntries(prevEntries => {
                             const newEntriesMap = new Map(prevEntries.map(e => [e.id, e]));
                             allParsed.forEach(p => {
@@ -556,7 +572,6 @@
                         });
                         alert("資料更新完成！");
                     } else {
-                        // 附加模式 (重新生成 ID 避免衝突)
                         setEntries(prevEntries => {
                             const appended = allParsed.map(p => ({...p, id: Date.now() + Math.random()}));
                             return [...prevEntries, ...appended].sort((a, b) => {
@@ -1188,7 +1203,6 @@
                                 </button>
                             </div>
                             
-                             {/* ... Import buttons ... */}
                             <div className="border-t border-slate-100 pt-5 space-y-2">
                                 <div className="flex justify-between items-center mb-2">
                                     <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">資料匯入</h4>
@@ -1238,7 +1252,7 @@
                         {activeTab === 'accounts' && renderAccounts()}
                         {activeTab === 'settings' && renderSettings()}
                     </div>
-                    {/* ... Navigation ... */}
+                    
                      <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-slate-200 px-6 py-2 pb-6 safe-area-bottom flex justify-between items-center shadow-[0_-4px_20px_-5px_rgba(0,0,0,0.05)] z-20">
                         <button onClick={() => setActiveTab('journal')} className={`flex flex-col items-center gap-1 tab-btn ${activeTab === 'journal' ? 'tab-active' : 'tab-inactive'}`}>
                             <div className="p-1"><Icons.Plus /></div>
