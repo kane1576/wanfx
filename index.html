@@ -12,7 +12,7 @@
     <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='120' fill='%232563eb'/%3E%3Cpath d='M368 160H144c-26.5 0-48 21.5-48 48v224h272V208c0-26.5-21.5-48-48-48z' fill='%2360a5fa'/%3E%3Cpath d='M368 128H144c-26.5 0-48 21.5-48 48v16h272v-16c0-26.5-21.5-48-48-48z' fill='%2393c5fd'/%3E%3Cpath d='M368 352H144c-17.7 0-32-14.3-32-32s14.3-32 32-32h224v64z' fill='%23ffffff'/%3E%3Cpath d='M320 320a16 16 0 1 1 0 32 16 16 0 1 1 0-32z' fill='%232563eb'/%3E%3C/svg%3E">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='120' fill='%232563eb'/%3E%3Cpath d='M368 160H144c-26.5 0-48 21.5-48 48v224h272V208c0-26.5-21.5-48-48-48z' fill='%2360a5fa'/%3E%3Cpath d='M368 128H144c-26.5 0-48 21.5-48 48v16h272v-16c0-26.5-21.5-48-48-48z' fill='%2393c5fd'/%3E%3Cpath d='M368 352H144c-17.7 0-32-14.3-32-32s14.3-32 32-32h224v64z' fill='%23ffffff'/%3E%3Cpath d='M320 320a16 16 0 1 1 0 32 16 16 0 1 1 0-32z' fill='%232563eb'/%3E%3C/svg%3E">
 
-    <title>個人會計記帳系統 </title>
+    <title>個人會計記帳系統</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
@@ -472,41 +472,100 @@
                         reader.onload = (e) => {
                             const lines = e.target.result.split(/\r\n|\n/);
                             const parsed = [];
+                            
+                            // 判斷是否為包含 ID, 幣別 等欄位的新版格式
+                            let isNewFormat = false;
+                            if (lines.length > 0 && lines[0].startsWith("ID,")) {
+                                isNewFormat = true;
+                            }
+
                             let isHeader = true;
                             lines.forEach((line) => {
                                 if (!line.trim()) return;
-                                const row = line.split(',');
+                                // 支援處理欄位內有逗號的情況 (如摘要包含逗號，會被雙引號包住)
+                                const row = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(s => s.replace(/^"|"$/g, '').trim());
+                                
                                 if (isHeader) {
-                                    if (row[0].includes('日期') || row[1].includes('會計科目')) { isHeader = false; return; }
+                                    if (row[0].includes('日期') || row[0].includes('ID') || row[1]?.includes('會計科目')) { isHeader = false; return; }
                                     isHeader = false;
                                 }
-                                if (row.length < 3) return;
-                                const date = row[0].trim();
-                                if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-                                const amount = parseFloat(row[2].trim());
-                                if (isNaN(amount)) return;
-                                parsed.push({ 
-                                    id: Date.now() + Math.random(), 
-                                    date, 
-                                    account: row[1].trim(), 
-                                    amount, 
-                                    currencyAmount: Math.abs(amount), 
-                                    currency: 'TWD', 
-                                    exchangeRate: 1,
-                                    description: row[3] ? row[3].trim() : "" 
-                                });
+
+                                if (isNewFormat) {
+                                    // 讀取新版 8 個欄位格式
+                                    if (row.length < 4) return;
+                                    const rawId = row[0];
+                                    const date = row[1];
+                                    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+                                    
+                                    const amount = parseFloat(row[3]);
+                                    if (isNaN(amount)) return;
+
+                                    parsed.push({
+                                        id: rawId ? parseFloat(rawId) : Date.now() + Math.random(),
+                                        date: date,
+                                        account: row[2],
+                                        amount: amount,
+                                        currencyAmount: parseFloat(row[4]) || 0,
+                                        currency: row[5] || 'TWD',
+                                        exchangeRate: parseFloat(row[6]) || 1,
+                                        description: row[7] || ""
+                                    });
+                                } else {
+                                    // 讀取舊版 4 個欄位格式
+                                    if (row.length < 3) return;
+                                    const date = row[0];
+                                    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+                                    const amount = parseFloat(row[2]);
+                                    if (isNaN(amount)) return;
+                                    
+                                    parsed.push({ 
+                                        id: Date.now() + Math.random(), 
+                                        date, 
+                                        account: row[1], 
+                                        amount, 
+                                        currencyAmount: Math.abs(amount), 
+                                        currency: 'TWD', 
+                                        exchangeRate: 1,
+                                        description: row[3] || "" 
+                                    });
+                                }
                             });
                             resolve(parsed);
                         };
                         reader.readAsText(file, isCsvUtf8 ? 'UTF-8' : 'Big5');
                     });
                 };
+
                 Promise.all(Array.from(files).map(processFile)).then((results) => {
                     const allParsed = results.flat();
                     if (allParsed.length === 0) { alert("匯入失敗：無有效資料"); return; }
-                    if (confirm(`讀取到 ${allParsed.length} 筆資料，確定匯入？`)) {
-                        setEntries([...entries, ...allParsed].sort((a, b) => new Date(b.date) - new Date(a.date)));
-                        alert("匯入完成");
+                    
+                    // 新增對話框，讓使用者選擇「更新」還是「附加」
+                    if (confirm(`讀取到 ${allParsed.length} 筆資料。\n\n▶ 按「確定」：以 ID 比對更新現有資料 (Excel 編輯後覆蓋)\n▶ 按「取消」：重新產生 ID，將全部資料當作新紀錄附加`)) {
+                        // 更新覆蓋模式
+                        setEntries(prevEntries => {
+                            const newEntriesMap = new Map(prevEntries.map(e => [e.id, e]));
+                            allParsed.forEach(p => {
+                                newEntriesMap.set(p.id, p);
+                            });
+                            return Array.from(newEntriesMap.values()).sort((a, b) => {
+                                const dateDiff = new Date(b.date) - new Date(a.date);
+                                if (dateDiff !== 0) return dateDiff;
+                                return b.id - a.id;
+                            });
+                        });
+                        alert("資料更新完成！");
+                    } else {
+                        // 附加模式 (重新生成 ID 避免衝突)
+                        setEntries(prevEntries => {
+                            const appended = allParsed.map(p => ({...p, id: Date.now() + Math.random()}));
+                            return [...prevEntries, ...appended].sort((a, b) => {
+                                const dateDiff = new Date(b.date) - new Date(a.date);
+                                if (dateDiff !== 0) return dateDiff;
+                                return b.id - a.id;
+                            });
+                        });
+                        alert("資料已附加完成！");
                     }
                     event.target.value = '';
                 });
